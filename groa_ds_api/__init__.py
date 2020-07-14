@@ -20,6 +20,8 @@ model_path = os.path.join(parent_path, 'w2v_limitingfactor_v3.51.model')
 
 predictor = MovieUtility(model_path)
 
+cache = redis.StrictRedis(host=os.getenv('REDIS_HOST'))
+
 
 def create_app():
 
@@ -28,7 +30,8 @@ def create_app():
         """
         Simple 'hello' from our API.
         """
-        return "This is the DS API for Groa"
+        welcome_message = "This is the DS API for Groa"
+        return welcome_message
 
     @app.post("/recommendations", response_model=RecOutput)
     async def get_recommendations(payload: RecInput, background_tasks: BackgroundTasks):
@@ -51,7 +54,13 @@ def create_app():
         `Will not always return as many recommendations as 
         num_recs due to the algorithms filtering process.`
         """
-        return predictor.get_recommendations(payload, background_tasks)
+        result = cache.get("recs"+payload.user_id)
+        if result is not None:
+            result = pickle.loads(result)
+            return result
+        result = predictor.get_recommendations(payload, background_tasks)
+        cache.set("recs"+payload.user_id, pickle.dumps(result))
+        return result
 
     @app.get("/recommendations/interaction/{user_id}/{movie_id}", response_model=str)
     async def interact_with_rec(user_id: str, movie_id: str):
@@ -84,6 +93,7 @@ def create_app():
         result = predictor.add_rating(payload)
         if result == "Failure":
             raise HTTPException(status_code=404, detail="Invalid request.")
+        cache.delete("recs"+payload.user_id)
         return result
 
     @app.post("/rating/{user_id}/remove/{movie_id}", response_model=str)
@@ -99,6 +109,7 @@ def create_app():
         result = predictor.remove_rating(user_id, movie_id)
         if result == "Failure":
             raise HTTPException(status_code=404, detail="Invalid request.")
+        cache.delete("recs"+user_id)
         return result
 
     @app.post("/watchlist", response_model=str)
@@ -110,6 +121,7 @@ def create_app():
         result = predictor.add_to_watchlist(payload)
         if result == "Failure":
             raise HTTPException(status_code=404, detail="Invalid request.")
+        cache.delete("recs"+payload.user_id)
         return result
 
     @app.post("/watchlist/{user_id}/remove/{movie_id}", response_model=str)
@@ -125,6 +137,7 @@ def create_app():
         result = predictor.remove_watchlist(user_id, movie_id)
         if result == "Failure":
             raise HTTPException(status_code=404, detail="Invalid request.")
+        cache.delete("recs"+user_id)
         return result
 
     @app.post("/notwatchlist", response_model=str)
@@ -136,6 +149,7 @@ def create_app():
         result = predictor.add_to_notwatchlist(payload)
         if result == "Failure":
             raise HTTPException(status_code=404, detail="Invalid request.")
+        cache.delete("recs"+payload.user_id)
         return result
 
     @app.post("/notwatchlist/{user_id}/remove/{movie_id}", response_model=str)
@@ -151,6 +165,7 @@ def create_app():
         result = predictor.remove_notwatchlist(user_id, movie_id)
         if result == "Failure":
             raise HTTPException(status_code=404, detail="Invalid request.")
+        cache.delete("recs"+user_id)
         return result
 
     @app.post("/similar-movies", response_model=SimOutput)
@@ -171,7 +186,13 @@ def create_app():
         `Will reliably return as many recommendations as indicated
         in num_movies parameter.`
         """
-        return predictor.get_similar_movies(payload)
+        result = cache.get("sim"+payload.movie_id)
+        if result is not None:
+            result = pickle.loads(result)
+            return result
+        result = predictor.get_similar_movies(payload)
+        cache.set("sim"+payload.movie_id, pickle.dumps(result))
+        return result
 
     @app.get("/service-providers/{movie_id}", response_model=ProviderOutput)
     async def service_providers(movie_id: str):
@@ -192,7 +213,13 @@ def create_app():
         - presentation_type (HD or SD)
         - monetization_type (buy, rent or flatrate)
         """
-        return predictor.get_service_providers(movie_id)
+        result = cache.get("prov"+movie_id)
+        if result is not None:
+            result = pickle.loads(result)
+            return result
+        result = predictor.get_service_providers(movie_id)
+        cache.set("prov"+movie_id, pickle.dumps(result))
+        return result
 
     @app.post("/search")
     async def search_movies(payload: SearchInput):
@@ -200,7 +227,8 @@ def create_app():
         Given the `SearchInput`, a request is made to our
         AWS Elast Search Service instance to get search results.
         """
-        return predictor.search_movies(payload.query)
+        result = predictor.search_movies(payload.query)
+        return result
 
     @app.get("/explore", response_model=ExploreOutput)
     async def explore():
@@ -210,9 +238,15 @@ def create_app():
         Returns:
         - **data:** List[Movie]
         """
+        today = datetime.today().strftime('%Y-%m-%d')
+        result = cache.get("explore"+today)
+        if result is not None:
+            result = pickle.loads(result)
+            return result
         result = predictor.get_recent_recommendations()
         if result == "Failure":
             raise HTTPException(status_code=404, detail="Invalid request.")
+        cache.set("explore"+today, pickle.dumps(result))
         return result
 
     @app.get("/explore/{user_id}")
@@ -224,9 +258,14 @@ def create_app():
         - **user_id:** str
         """
         # the lists work to a degree but still need a title
+        result = cache.get("explore"+user_id)
+        if result is not None:
+            result = pickle.loads(result)
+            return result
         result = predictor.get_recent_recommendations(user_id)
         if result == "Failure":
             raise HTTPException(status_code=404, detail="Invalid request.")
+        cache.set("explore"+user_id, pickle.dumps(result))
         return result
 
     """ Start of Movie List routes """
@@ -246,6 +285,9 @@ def create_app():
         result = predictor.create_movie_list(payload)
         if result == "Failure":
             raise HTTPException(status_code=404, detail="Invalid request.")
+        cache.delete("lists"+payload.user_id)
+        if not payload.private:
+            cache.delete("alllists")
         return result
 
     @app.get("/movie-list/all", response_model=List[MovieList])
@@ -253,9 +295,14 @@ def create_app():
         """
         Gets all public movie lists.
         """
+        result = cache.get("alllists")
+        if result is not None:
+            result = pickle.loads(result)
+            return result
         result = predictor.get_all_lists()
         if result == "Failure":
             raise HTTPException(status_code=404, detail="Invalid request.")
+        cache.set("alllists", pickle.dumps(result))
         return result
 
     @app.get("/movie-list/all/{user_id}", response_model=List[MovieList])
@@ -274,9 +321,14 @@ def create_app():
         - list_id: int
         - name: str
         """
+        result = cache.get("lists"+user_id)
+        if result is not None:
+            result = pickle.loads(result)
+            return result
         result = predictor.get_user_lists(user_id)
         if result == "Failure":
             raise HTTPException(status_code=404, detail="Invalid request.")
+        cache.set("lists"+user_id, pickle.dumps(result))
         return result
 
     @app.get("/movie-list/{list_id}", response_model=GetListOutput)
@@ -294,9 +346,14 @@ def create_app():
         - movie_list: List[Movie]
         - recs: List[Movie]
         """
+        result = cache.get("movielist"+str(list_id))
+        if result is not None:
+            result = pickle.loads(result)
+            return result
         result = predictor.get_movie_list(list_id)
         if result == "Failure":
             raise HTTPException(status_code=404, detail="Invalid request.")
+        cache.set("movielist"+str(list_id), pickle.dumps(result))
         return result
 
     @app.put("/movie-list/{list_id}/add/{movie_id}", response_model=str)
@@ -315,6 +372,7 @@ def create_app():
         result = predictor.add_to_movie_list(list_id, movie_id)
         if result == "Failure":
             raise HTTPException(status_code=404, detail="Invalid request.")
+        cache.delete("movielist"+str(list_id))
         return result
 
     @app.put("/movie-list/{list_id}/remove/{movie_id}", response_model=str)
@@ -333,6 +391,7 @@ def create_app():
         result = predictor.remove_from_movie_list(list_id, movie_id)
         if result == "Failure":
             raise HTTPException(status_code=404, detail="Invalid request.")
+        cache.delete("movielist"+str(list_id))
         return result
 
     @app.delete("/movie-list/{list_id}", response_model=str)
@@ -349,6 +408,10 @@ def create_app():
         result = predictor.delete_movie_list(list_id)
         if result == "Failure":
             raise HTTPException(status_code=404, detail="Invalid request.")
+        cache.delete("movielist"+str(list_id))
+        cache.delete("lists"+str(result[0]))
+        if not result[1]:
+            cache.delete("alllists")
         return "Success"
     """ End of Movie List routes """
 
