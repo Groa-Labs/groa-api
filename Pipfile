@@ -16,7 +16,6 @@ python-dotenv = "*"
 fastapi = "*"
 uvicorn = "*"
 pydantic = "*"
-redis = "*"
 elasticsearch = "*"
 requests-aws4auth = "*"
 

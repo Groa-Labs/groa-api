@@ -3,7 +3,6 @@ from groa_ds_api.utils import MovieUtility
 from groa_ds_api.models import *
 import os
 from pathlib import Path
-import redis
 import pickle
 from typing import List
 from datetime import datetime
