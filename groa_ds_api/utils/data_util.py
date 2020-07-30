@@ -293,7 +293,7 @@ class DataUtility(object):
             })
         return prov_json
 
-    def get_recent_recommendations(self, user_id: str = None):
+    def get_recent_recommendations(self):
         """ Grabs the movies of recent recommendations from our API """
         query = """
         SELECT m.movie_id
@@ -309,25 +309,6 @@ class DataUtility(object):
         rec_data = self.info_tool.get_info(recs_df)
         rec_data = rec_data.fillna("None")
         rec_json = self.__get_JSON(rec_data)
-        explore_lists = []
-        if user_id is not None:
-            query = """
-            SELECT movie_id FROM user_ratings
-            WHERE user_id=%s AND rating > 3
-            ORDER BY date DESC
-            LIMIT 3;
-            """
-            success, movie_ids = self.db.run_query(
-                query, params=(user_id,), fetch="all")
-            if not success:
-                return "Failure"
-            if len(movie_ids) > 0:
-                explore_lists = [self.get_similar_movies(SimInput(movie_id=elem[0], num_movies=10))
-                                 for elem in movie_ids]
-            return {
-                "data": rec_json,
-                "lists": explore_lists
-            }
         return {
             "data": rec_json
         }

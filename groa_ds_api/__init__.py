@@ -256,25 +256,6 @@ def create_app():
         cache.set("explore"+today, pickle.dumps(result))
         return result
 
-    @app.get("/explore/{user_id}")
-    async def explore_user(user_id: str):
-        """
-        Given a `user_id`, explore data is returned.
-
-        Parameters:
-        - **user_id:** str
-        """
-        # the lists work to a degree but still need a title
-        result = cache.get("explore"+user_id)
-        if result is not None:
-            result = pickle.loads(result)
-            return result
-        result = data_tool.get_recent_recommendations(user_id)
-        if result == "Failure":
-            raise HTTPException(status_code=404, detail="Invalid request.")
-        cache.set("explore"+user_id, pickle.dumps(result))
-        return result
-
     """ Start of Movie List routes """
     @app.post("/movie-list", response_model=MovieList)
     async def create_movie_list(payload: CreateListInput):
