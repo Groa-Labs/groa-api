@@ -8,10 +8,10 @@ import redis
 from fastapi import BackgroundTasks, FastAPI, HTTPException
 
 from groa_ds_api.models import *
-from groa_ds_api.utils.recommendation_utility import RecommendationUtility
 from groa_ds_api.utils.data_util import DataUtility
-from groa_ds_api.utils.info_util import InfoUtility
 from groa_ds_api.utils.database_util import DatabaseUtility
+from groa_ds_api.utils.info_util import InfoUtility
+from groa_ds_api.utils.recommendation_utility import RecommendationUtility
 
 app = FastAPI(
     title="groa-ds-api",
