@@ -106,3 +106,6 @@ ENV/
 # Elastic Beanstalk Files
 .elasticbeanstalk
 .ebextensions
+
+# vscode
+.vscode

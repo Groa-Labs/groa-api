@@ -1,13 +1,14 @@
-from fastapi import FastAPI, BackgroundTasks, HTTPException
-from groa_ds_api.utils import MovieUtility
-from groa_ds_api.models import *
 import os
-from pathlib import Path
-import redis
 import pickle
-from typing import List
 from datetime import datetime
+from pathlib import Path
+from typing import List
 
+import redis
+from fastapi import BackgroundTasks, FastAPI, HTTPException
+
+from groa_ds_api.models import *
+from groa_ds_api.utils import MovieUtility
 
 app = FastAPI(
     title="groa-ds-api",
@@ -20,7 +21,7 @@ model_path = os.path.join(parent_path, 'w2v_limitingfactor_v3.51.model')
 
 predictor = MovieUtility(model_path)
 
-cache = redis.StrictRedis(host=os.getenv('REDIS_HOST'))
+cache = redis.StrictRedis(host=str(os.getenv('REDIS_HOST')))
 
 
 def create_app():

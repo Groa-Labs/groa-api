@@ -1,5 +1,6 @@
+import uvicorn  # type: ignore
+
 from groa_ds_api import create_app
-import uvicorn
 
 application = app = create_app()
 

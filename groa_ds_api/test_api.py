@@ -1,4 +1,5 @@
 from fastapi.testclient import TestClient
+
 from groa_ds_api import create_app
 
 application = create_app()
@@ -17,7 +18,7 @@ def test_wrong_method():
 
 def test_recommendations():
     payload = {
-        "user_id": "11",
+        "user_id": "00ujpux3luGlEXXVz4x6",
         "num_recs": 50,
         "good_threshold": 5,
         "bad_threshold": 4,
@@ -28,7 +29,7 @@ def test_recommendations():
 
 
 def test_recommendations_interaction():
-    response = client.get("/recommendations/interaction/00ubmnwy5j5shXUQY4x6/0200720")
+    response = client.get("/recommendations/interaction/00ujpux3luGlEXXVz4x6/0200720")
     assert response.status_code == 200
 
 
@@ -42,7 +43,7 @@ def test_search():
 
 def test_rating():
     payload = {
-        "user_id": "00ubmnwy5j5shXUQY4x6",
+        "user_id": "00ujpux3luGlEXXVz4x6",
         "movie_id": "0181865",
         "rating": 5.0
     }
@@ -55,7 +56,7 @@ def test_rating():
 
 def test_watchlist():
     payload = {
-        "user_id": "00ubmnwy5j5shXUQY4x6",
+        "user_id": "00ujpux3luGlEXXVz4x6",
         "movie_id": "0200720"
     }
     response = client.post("/watchlist", json=payload)
@@ -66,7 +67,7 @@ def test_watchlist():
 
 def test_notwatchlist():
     payload = {
-        "user_id": "00ubmnwy5j5shXUQY4x6",
+        "user_id": "00ujpux3luGlEXXVz4x6",
         "movie_id": "0200720"
     }
     response = client.post("/notwatchlist", json=payload)
@@ -95,13 +96,13 @@ def test_explore():
 
 
 def test_explore_user():
-    response = client.get("/explore/00ubmnwy5j5shXUQY4x6")
+    response = client.get("/explore/00ujpux3luGlEXXVz4x6")
     assert response.status_code == 200
 
 
 def test_movie_lists():
     payload = {
-        "user_id": "00ubmnwy5j5shXUQY4x6",
+        "user_id": "00ujpux3luGlEXXVz4x6",
         "name": "Tester List",
         "private": False
     }
@@ -128,5 +129,5 @@ def test_get_all_lists():
 
 
 def test_get_user_lists():
-    response = client.get("/movie-list/all/00ubmnwy5j5shXUQY4x6")
+    response = client.get("/movie-list/all/00ujpux3luGlEXXVz4x6")
     assert response.status_code == 200

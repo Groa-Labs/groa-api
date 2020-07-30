@@ -1,15 +1,18 @@
-import pandas as pd
-import numpy as np
-import gensim
-import re
-import os
-import psycopg2
-import json
 import hashlib
+import json
+import os
+import re
 from datetime import datetime
+from typing import Any, Dict, List, Optional, Tuple
+
+import gensim  # type: ignore
+import numpy as np  # type: ignore
+import pandas as pd  # type: ignore
+import psycopg2  # type: ignore
+from elasticsearch import Elasticsearch, RequestsHttpConnection  # type: ignore
+from requests_aws4auth import AWS4Auth  # type: ignore
+
 from groa_ds_api.models import *
-from elasticsearch import Elasticsearch, RequestsHttpConnection
-from requests_aws4auth import AWS4Auth
 
 
 class MovieUtility(object):
@@ -150,13 +153,13 @@ class MovieUtility(object):
 
         return (good_list, bad_list, hist_list, val_list, ratings_dict)
 
-    def __predict(self, input: list,
-                  bad_movies: list = [],
-                  hist_list: list = [],
-                  val_list: list = [],
-                  ratings_dict: dict = {},
-                  checked_list: list = [],
-                  rejected_list: list = [],
+    def __predict(self, input: List,
+                  bad_movies: List = [],
+                  hist_list: List = [],
+                  val_list: List = [],
+                  ratings_dict: Dict = {},
+                  checked_list: List = [],
+                  rejected_list: List = [],
                   n: int = 50,
                   harshness: int = 1):
         """
@@ -173,7 +176,7 @@ class MovieUtility(object):
         # list for storing duplicates for scoring
         dupes = []
 
-        def _aggregate_vectors(movies, feedback_list=[]):
+        def _aggregate_vectors(movies: List, feedback_list: List = []):
             """ Gets the vector average of a list of movies """
             movie_vec = []
             for i in movies:
@@ -206,20 +209,20 @@ class MovieUtility(object):
                         continue
             return np.mean(movie_vec, axis=0)
 
-        def _similar_movies(v, n, bad_movies=[]):
+        def _similar_movies(v, n, bad_movies: List[str] = []):
             """ Aggregates movies and finds n vectors with highest cosine similarity """
             if bad_movies:
                 v = _remove_dislikes(bad_movies, v, harshness=harshness)
             return clf.wv.similar_by_vector(v, topn=n+1)[1:]
 
-        def _remove_dupes(recs, input, bad_movies, hist_list=[], feedback_list=[]):
+        def _remove_dupes(recs, input: List[str], bad_movies: List[str], hist_list: List[str] = [], feedback_list: List[str] = []):
             """ Remove any recommended IDs that were in the input list """
             all_rated = input + bad_movies + hist_list + feedback_list
             nonlocal dupes
             dupes = [x for x in recs if x[0] in input]
             return [x for x in recs if x[0] not in all_rated]
 
-        def _remove_dislikes(bad_movies, good_movies_vec, rejected_list=[], harshness=1):
+        def _remove_dislikes(bad_movies: List[str], good_movies_vec: List[str], rejected_list: List[str] = [], harshness: int = 1):
             """ Takes a list of movies that the user dislikes.
             Their embeddings are averaged,
             and subtracted from the input. """
@@ -233,7 +236,7 @@ class MovieUtility(object):
                              hist_list, checked_list + rejected_list)
         return recs
 
-    def __get_list_preview(self, data: tuple):
+    def __get_list_preview(self, data: Tuple[int, str, bool]):
         """ 
         Turns list preview sql into an object.
         Callers:
@@ -247,12 +250,12 @@ class MovieUtility(object):
         }
 
     def __run_query(self, query: str,
-                    params: tuple = None,
+                    params: Tuple[Any, ...] = (),
                     commit: bool = False,
                     fetch: str = "one"):
         try:
             cursor_dog = self.__get_cursor()
-            if params is None:
+            if len(params) == 0:
                 cursor_dog.execute(query)
             else:
                 cursor_dog.execute(query, params)
@@ -297,7 +300,7 @@ class MovieUtility(object):
             return "Failure"
         return "Success"
 
-    def remove_rating(self, user_id, movie_id):
+    def remove_rating(self, user_id: str, movie_id: str):
         """
         Removes a single rating from the user_ratings table.
         """
@@ -330,7 +333,7 @@ class MovieUtility(object):
                 return "Failure"
         return "Success"
 
-    def remove_watchlist(self, user_id, movie_id):
+    def remove_watchlist(self, user_id: str, movie_id: str):
         query = "DELETE FROM user_watchlist WHERE user_id = %s AND movie_id = %s;"
         params = (user_id, movie_id)
         success, _ = self.__run_query(
@@ -359,7 +362,7 @@ class MovieUtility(object):
                 return "Failure"
         return "Success"
 
-    def remove_notwatchlist(self, user_id, movie_id):
+    def remove_notwatchlist(self, user_id: str, movie_id: str):
         query = "DELETE FROM user_willnotwatchlist WHERE user_id = %s AND movie_id = %s;"
         success, _ = self.__run_query(
             query,
@@ -493,7 +496,7 @@ class MovieUtility(object):
             return "Failure"
         return result[0]
 
-    def get_most_similar_title(self, movie_id: str, id_list: list):
+    def get_most_similar_title(self, movie_id: str, id_list: List[str]):
         """ Get the title of the most similar movie to movie_id from id_list """
         clf = self.model
         vocab = clf.wv.vocab

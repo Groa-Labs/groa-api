@@ -19,6 +19,9 @@ pydantic = "*"
 redis = "*"
 elasticsearch = "*"
 requests-aws4auth = "*"
+flake8 = "*"
+mypy = "*"
+isort = "*"
 
 [requires]
 python_version = "3.7"

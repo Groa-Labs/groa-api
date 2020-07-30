@@ -1,5 +1,7 @@
-from pydantic import BaseModel
 from typing import List
+
+from pydantic import BaseModel
+
 """
 These are request and response models used by
 FastAPI to monitor/enforce the data types of the
