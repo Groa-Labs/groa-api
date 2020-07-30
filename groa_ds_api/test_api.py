@@ -95,11 +95,6 @@ def test_explore():
     assert response.status_code == 200
 
 
-def test_explore_user():
-    response = client.get("/explore/00ujpux3luGlEXXVz4x6")
-    assert response.status_code == 200
-
-
 def test_movie_lists():
     payload = {
         "user_id": "00ujpux3luGlEXXVz4x6",
