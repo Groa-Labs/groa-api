@@ -8,7 +8,10 @@ import redis
 from fastapi import BackgroundTasks, FastAPI, HTTPException
 
 from groa_ds_api.models import *
-from groa_ds_api.utils import MovieUtility
+from groa_ds_api.utils.recommendation_utility import RecommendationUtility
+from groa_ds_api.utils.data_util import DataUtility
+from groa_ds_api.utils.info_util import InfoUtility
+from groa_ds_api.utils.database_util import DatabaseUtility
 
 app = FastAPI(
     title="groa-ds-api",
@@ -19,7 +22,10 @@ app = FastAPI(
 parent_path = Path(__file__).resolve().parents[1]
 model_path = os.path.join(parent_path, 'w2v_limitingfactor_v3.51.model')
 
-predictor = MovieUtility(model_path)
+db_tool = DatabaseUtility()
+info_tool = InfoUtility(db_tool)
+predictor = RecommendationUtility(model_path, db_tool, info_tool)
+data_tool = DataUtility(db_tool, info_tool)
 
 cache = redis.StrictRedis(host=str(os.getenv('REDIS_HOST')))
 
@@ -62,113 +68,7 @@ def create_app():
         result = predictor.get_recommendations(payload, background_tasks)
         cache.set("recs"+payload.user_id, pickle.dumps(result))
         return result
-
-    @app.get("/recommendations/interaction/{user_id}/{movie_id}", response_model=str)
-    async def interact_with_rec(user_id: str, movie_id: str):
-        """
-        Given a `user_id` and `movie_id`, we update the movie recommendation to have
-        an interaction value of `TRUE`.
-
-        Parameters:
-
-        - **rec_id:** str
-        - **movie_id:** str
-        """
-        result = predictor.add_interaction(user_id, movie_id)
-        if result == "Failure":
-            raise HTTPException(status_code=404, detail="Invalid request.")
-        return result
-
-    @app.post("/rating", response_model=str)
-    async def add_rating(payload: RatingInput):
-        """
-        Given the `RatingInput`, we add the rating to the DB and 
-        remove cached recs to account for new info collected.
-
-        Parameters:
-
-        - **user_id:** str
-        - **movie_id:** str
-        - **rating:** float
-        """
-        result = predictor.add_rating(payload)
-        if result == "Failure":
-            raise HTTPException(status_code=404, detail="Invalid request.")
-        cache.delete("recs"+payload.user_id)
-        return result
-
-    @app.post("/rating/{user_id}/remove/{movie_id}", response_model=str)
-    async def remove_rating(user_id: str, movie_id: str):
-        """
-        Given the user_id and movie_id, we remove a user's rating
-        from the users_rating table in the DB.
-
-        Parameters:
-        - **user_id** str
-        - **movie_id** str
-        """
-        result = predictor.remove_rating(user_id, movie_id)
-        if result == "Failure":
-            raise HTTPException(status_code=404, detail="Invalid request.")
-        cache.delete("recs"+user_id)
-        return result
-
-    @app.post("/watchlist", response_model=str)
-    async def add_to_watchlist(payload: UserAndMovieInput):
-        """
-        Given the `UserAndMovieInput`, the movie is added to the
-        user's watchlist.
-        """
-        result = predictor.add_to_watchlist(payload)
-        if result == "Failure":
-            raise HTTPException(status_code=404, detail="Invalid request.")
-        cache.delete("recs"+payload.user_id)
-        return result
-
-    @app.post("/watchlist/{user_id}/remove/{movie_id}", response_model=str)
-    async def remove_watchlist(user_id: str, movie_id: str):
-        """
-        Given the user_id and movie_id, we remove a user's watchlist
-        from the users_watchlist table in the DB.
-
-        Parameters:
-        - **user_id** str
-        - **movie_id** str
-        """
-        result = predictor.remove_watchlist(user_id, movie_id)
-        if result == "Failure":
-            raise HTTPException(status_code=404, detail="Invalid request.")
-        cache.delete("recs"+user_id)
-        return result
-
-    @app.post("/notwatchlist", response_model=str)
-    async def add_to_notwatchlist(payload: UserAndMovieInput):
-        """
-        Given the `UserAndMovieInput`, the movie is added to the
-        user's willnotwatchlist.
-        """
-        result = predictor.add_to_notwatchlist(payload)
-        if result == "Failure":
-            raise HTTPException(status_code=404, detail="Invalid request.")
-        cache.delete("recs"+payload.user_id)
-        return result
-
-    @app.post("/notwatchlist/{user_id}/remove/{movie_id}", response_model=str)
-    async def remove_notwatchlist(user_id: str, movie_id: str):
-        """
-        Given the user_id and movie_id, we remove a user's notwatchlist
-        from the users_notwatchlist table in the DB.
-
-        Parameters:
-        - **user_id** str
-        - **movie_id** str
-        """
-        result = predictor.remove_notwatchlist(user_id, movie_id)
-        if result == "Failure":
-            raise HTTPException(status_code=404, detail="Invalid request.")
-        cache.delete("recs"+user_id)
-        return result
-
+    
     @app.post("/similar-movies", response_model=SimOutput)
     async def get_similar_movies(payload: SimInput):
         """
@@ -195,6 +95,112 @@ def create_app():
         cache.set("sim"+payload.movie_id, pickle.dumps(result))
         return result
 
+    @app.get("/recommendations/interaction/{user_id}/{movie_id}", response_model=str)
+    async def interact_with_rec(user_id: str, movie_id: str):
+        """
+        Given a `user_id` and `movie_id`, we update the movie recommendation to have
+        an interaction value of `TRUE`.
+
+        Parameters:
+
+        - **rec_id:** str
+        - **movie_id:** str
+        """
+        result = data_tool.add_interaction(user_id, movie_id)
+        if result == "Failure":
+            raise HTTPException(status_code=404, detail="Invalid request.")
+        return result
+
+    @app.post("/rating", response_model=str)
+    async def add_rating(payload: RatingInput):
+        """
+        Given the `RatingInput`, we add the rating to the DB and 
+        remove cached recs to account for new info collected.
+
+        Parameters:
+
+        - **user_id:** str
+        - **movie_id:** str
+        - **rating:** float
+        """
+        result = data_tool.add_rating(payload)
+        if result == "Failure":
+            raise HTTPException(status_code=404, detail="Invalid request.")
+        cache.delete("recs"+payload.user_id)
+        return result
+
+    @app.post("/rating/{user_id}/remove/{movie_id}", response_model=str)
+    async def remove_rating(user_id: str, movie_id: str):
+        """
+        Given the user_id and movie_id, we remove a user's rating
+        from the users_rating table in the DB.
+
+        Parameters:
+        - **user_id** str
+        - **movie_id** str
+        """
+        result = data_tool.remove_rating(user_id, movie_id)
+        if result == "Failure":
+            raise HTTPException(status_code=404, detail="Invalid request.")
+        cache.delete("recs"+user_id)
+        return result
+
+    @app.post("/watchlist", response_model=str)
+    async def add_to_watchlist(payload: UserAndMovieInput):
+        """
+        Given the `UserAndMovieInput`, the movie is added to the
+        user's watchlist.
+        """
+        result = data_tool.add_to_watchlist(payload)
+        if result == "Failure":
+            raise HTTPException(status_code=404, detail="Invalid request.")
+        cache.delete("recs"+payload.user_id)
+        return result
+
+    @app.post("/watchlist/{user_id}/remove/{movie_id}", response_model=str)
+    async def remove_watchlist(user_id: str, movie_id: str):
+        """
+        Given the user_id and movie_id, we remove a user's watchlist
+        from the users_watchlist table in the DB.
+
+        Parameters:
+        - **user_id** str
+        - **movie_id** str
+        """
+        result = data_tool.remove_watchlist(user_id, movie_id)
+        if result == "Failure":
+            raise HTTPException(status_code=404, detail="Invalid request.")
+        cache.delete("recs"+user_id)
+        return result
+
+    @app.post("/notwatchlist", response_model=str)
+    async def add_to_notwatchlist(payload: UserAndMovieInput):
+        """
+        Given the `UserAndMovieInput`, the movie is added to the
+        user's willnotwatchlist.
+        """
+        result = data_tool.add_to_notwatchlist(payload)
+        if result == "Failure":
+            raise HTTPException(status_code=404, detail="Invalid request.")
+        cache.delete("recs"+payload.user_id)
+        return result
+
+    @app.post("/notwatchlist/{user_id}/remove/{movie_id}", response_model=str)
+    async def remove_notwatchlist(user_id: str, movie_id: str):
+        """
+        Given the user_id and movie_id, we remove a user's notwatchlist
+        from the users_notwatchlist table in the DB.
+
+        Parameters:
+        - **user_id** str
+        - **movie_id** str
+        """
+        result = data_tool.remove_notwatchlist(user_id, movie_id)
+        if result == "Failure":
+            raise HTTPException(status_code=404, detail="Invalid request.")
+        cache.delete("recs"+user_id)
+        return result
+
     @app.get("/service-providers/{movie_id}", response_model=ProviderOutput)
     async def service_providers(movie_id: str):
         """
@@ -218,7 +224,7 @@ def create_app():
         if result is not None:
             result = pickle.loads(result)
             return result
-        result = predictor.get_service_providers(movie_id)
+        result = data_tool.get_service_providers(movie_id)
         cache.set("prov"+movie_id, pickle.dumps(result))
         return result
 
@@ -228,7 +234,7 @@ def create_app():
         Given the `SearchInput`, a request is made to our
         AWS Elast Search Service instance to get search results.
         """
-        result = predictor.search_movies(payload.query)
+        result = data_tool.search_movies(payload.query)
         return result
 
     @app.get("/explore", response_model=ExploreOutput)
@@ -244,7 +250,7 @@ def create_app():
         if result is not None:
             result = pickle.loads(result)
             return result
-        result = predictor.get_recent_recommendations()
+        result = data_tool.get_recent_recommendations()
         if result == "Failure":
             raise HTTPException(status_code=404, detail="Invalid request.")
         cache.set("explore"+today, pickle.dumps(result))
@@ -263,7 +269,7 @@ def create_app():
         if result is not None:
             result = pickle.loads(result)
             return result
-        result = predictor.get_recent_recommendations(user_id)
+        result = data_tool.get_recent_recommendations(user_id)
         if result == "Failure":
             raise HTTPException(status_code=404, detail="Invalid request.")
         cache.set("explore"+user_id, pickle.dumps(result))
@@ -283,7 +289,7 @@ def create_app():
         Returns:
         - **list_id:** int
         """
-        result = predictor.create_movie_list(payload)
+        result = data_tool.create_movie_list(payload)
         if result == "Failure":
             raise HTTPException(status_code=404, detail="Invalid request.")
         cache.delete("lists"+payload.user_id)
@@ -300,7 +306,7 @@ def create_app():
         if result is not None:
             result = pickle.loads(result)
             return result
-        result = predictor.get_all_lists()
+        result = data_tool.get_all_lists()
         if result == "Failure":
             raise HTTPException(status_code=404, detail="Invalid request.")
         cache.set("alllists", pickle.dumps(result))
@@ -326,7 +332,7 @@ def create_app():
         if result is not None:
             result = pickle.loads(result)
             return result
-        result = predictor.get_user_lists(user_id)
+        result = data_tool.get_user_lists(user_id)
         if result == "Failure":
             raise HTTPException(status_code=404, detail="Invalid request.")
         cache.set("lists"+user_id, pickle.dumps(result))
@@ -370,7 +376,7 @@ def create_app():
         Returns:
         - result: str
         """
-        result = predictor.add_to_movie_list(list_id, movie_id)
+        result = data_tool.add_to_movie_list(list_id, movie_id)
         if result == "Failure":
             raise HTTPException(status_code=404, detail="Invalid request.")
         cache.delete("movielist"+str(list_id))
@@ -389,7 +395,7 @@ def create_app():
         Returns:
         - result: str
         """
-        result = predictor.remove_from_movie_list(list_id, movie_id)
+        result = data_tool.remove_from_movie_list(list_id, movie_id)
         if result == "Failure":
             raise HTTPException(status_code=404, detail="Invalid request.")
         cache.delete("movielist"+str(list_id))
@@ -406,7 +412,7 @@ def create_app():
         Returns:
         - result: str
         """
-        result = predictor.delete_movie_list(list_id)
+        result = data_tool.delete_movie_list(list_id)
         if result == "Failure":
             raise HTTPException(status_code=404, detail="Invalid request.")
         cache.delete("movielist"+str(list_id))
