@@ -2,7 +2,7 @@ import json
 import os
 import re
 from datetime import datetime
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Dict, List, Tuple
 
 import gensim  # type: ignore
 import numpy as np  # type: ignore

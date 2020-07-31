@@ -1,5 +1,5 @@
 import os
-from typing import Any, List, Optional, Tuple
+from typing import Any, Tuple
 
 import psycopg2  # type: ignore
 
