@@ -7,32 +7,72 @@ from typing import Any, Dict, List, Optional, Tuple
 import gensim  # type: ignore
 import numpy as np  # type: ignore
 import pandas as pd  # type: ignore
+from elasticsearch import Elasticsearch, RequestsHttpConnection  # type: ignore
+from requests_aws4auth import AWS4Auth  # type: ignore
 
 from groa_ds_api.models import *
 from groa_ds_api.utils.database_util import DatabaseUtility
-from groa_ds_api.utils.info_util import InfoUtility
 
 
-class RecommendationUtility(object):
+class MovieUtility(object):
     """ Movie utility class that uses a W2V model to recommend movies
     based on the movies a user likes and dislikes """
 
-    def __init__(self, model_path: str, db_tool: DatabaseUtility, info_tool: InfoUtility):
+    def __init__(self, model_path: str):
         """ Initialize model with name of .model file """
         self.model_path = model_path
         self.model = self.__load_model()
-        self.db = db_tool
-        self.info_tool = info_tool
+        self.db = DatabaseUtility()
+        self.id_book = self.__get_id_book()
+        self.es = self.__get_es()
 
     # ------- Start Private Methods -------
     def __load_model(self):
         """ Get the model object for this instance, loading it if it's not already loaded """
         w2v_model = gensim.models.Word2Vec.load(self.model_path)
-        # Keep only the normalized vectors.
-        # This saves memory but makes the model untrainable (read-only).
         w2v_model.init_sims(replace=True)
         self.model = w2v_model
         return self.model
+    
+    def __get_id_book(self):
+        """ Gets movie data from database to merge with recommendations """
+        query = """
+        SELECT movie_id, primary_title, start_year, genres, 
+        poster_url, trailer_url, description, average_rating 
+        FROM movies;"""
+        success, movie_sql = self.db.run_query(query, fetch="all")
+        
+        id_book = pd.DataFrame(movie_sql, columns=[
+                               'movie_id', 'title', 'year', 'genres', 'poster_url',
+                               'trailer_url', 'description', 'avg_rating'])
+        return id_book
+
+    def __get_info(self, recs: pd.DataFrame):
+        """ Merging recs with id_book to get movie info """
+        return pd.merge(recs, self.id_book, how='left', on='movie_id')
+    
+    def __get_es(self):
+        return Elasticsearch(
+            hosts=[{'host': os.getenv('ELASTIC'), 'port': 443}],
+            http_auth=AWS4Auth(os.getenv('ACCESS_ID'), os.getenv(
+                'ACCESS_SECRET'), 'us-east-1', 'es'),
+            use_ssl=True,
+            verify_certs=True,
+            connection_class=RequestsHttpConnection
+        )
+
+    def __get_list_preview(self, data: Tuple[int, str, bool]):
+        """ 
+        Turns list preview sql into an object.
+        Callers:
+            - get_user_lists
+            - get_all_lists 
+        """
+        return {
+            "list_id": data[0],
+            "name": data[1],
+            "private": data[2]
+        }
 
     def __get_JSON(self, rec_df: pd.DataFrame):
         """ 
@@ -185,19 +225,6 @@ class RecommendationUtility(object):
         recs = _remove_dupes(recs, input, bad_movies,
                              hist_list, checked_list + rejected_list)
         return recs
-
-    def __get_list_preview(self, data: Tuple[int, str, bool]):
-        """ 
-        Turns list preview sql into an object.
-        Callers:
-            - get_user_lists
-            - get_all_lists 
-        """
-        return {
-            "list_id": data[0],
-            "name": data[1],
-            "private": data[2]
-        }
     # ------- End Private Methods -------
 
     # ------- Start Public Methods -------
@@ -223,7 +250,7 @@ class RecommendationUtility(object):
             m_vec = clf.wv.__getitem__(movie_id)
             movies_df = pd.DataFrame(clf.wv.similar_by_vector(
                 m_vec, topn=n+1)[1:], columns=['movie_id', 'score'])
-            result_df = self.info_tool.get_info(movies_df)
+            result_df = self.__get_info(movies_df)
             result_df = result_df.fillna("None")
             return {
                 "data": self.__get_JSON(result_df)
@@ -279,7 +306,7 @@ class RecommendationUtility(object):
         df_w2v = pd.DataFrame(w2v_preds, columns=['movie_id', 'score'])
 
         # get movie info using movie_id
-        rec_data = self.info_tool.get_info(df_w2v)
+        rec_data = self.__get_info(df_w2v)
         rec_data = rec_data.fillna("None")
 
         def _commit_to_database(model_recs, user_id, num_recs, good, bad, harsh):
@@ -331,13 +358,253 @@ class RecommendationUtility(object):
         }
         if len(list_sql) > 0:
             movie_ids = [movie[0] for movie in list_sql]
-            data_df = self.info_tool.get_info(pd.DataFrame({"movie_id": movie_ids}))
+            data_df = self.__get_info(pd.DataFrame({"movie_id": movie_ids}))
             data_df = data_df.fillna("None")
             list_json["data"] = self.__get_JSON(data_df)
             w2v_preds = self.__predict(movie_ids)
             df_w2v = pd.DataFrame(w2v_preds, columns=['movie_id', 'score'])
-            rec_data = self.info_tool.get_info(df_w2v)
+            rec_data = self.__get_info(df_w2v)
             rec_data = rec_data.fillna("None")
             list_json["recs"] = self.__get_JSON(rec_data)
         return list_json
+    
+    def add_rating(self, payload: RatingInput):
+        query = "SELECT COUNT(*) FROM user_ratings WHERE user_id = %s AND movie_id = %s;"
+        params = (payload.user_id, payload.movie_id)
+        success, rating = self.db.run_query(query, params=params, fetch="one")
+        if not success:
+            return "Failure"
+        if rating > 0:
+            query = """UPDATE user_ratings SET rating = %s, date = %s
+            WHERE user_id = %s AND movie_id = %s"""
+            params = (payload.rating, datetime.now(),
+                      payload.user_id, payload.movie_id)
+        else:
+            query = """
+            INSERT INTO user_ratings
+            (user_id, movie_id, rating, date, source)
+            VALUES (%s, %s, %s, %s, %s)
+            """
+            params = (payload.user_id, payload.movie_id,
+                      payload.rating, datetime.now(), "groa")
+        success, _ = self.db.run_query(
+            query, params=params, commit=True, fetch="none")
+        if not success:
+            return "Failure"
+        return "Success"
+
+    def remove_rating(self, user_id: str, movie_id: str):
+        """
+        Removes a single rating from the user_ratings table.
+        """
+        query = "DELETE FROM user_ratings WHERE user_id = %s AND movie_id = %s;"
+        params = (user_id, movie_id)
+        success, _ = self.db.run_query(
+            query, params=params, commit=True, fetch="none")
+        if not success:
+            return "Failure"
+        return "Success"
+
+    def add_to_watchlist(self, payload: UserAndMovieInput):
+        query = "SELECT COUNT(*) FROM user_watchlist WHERE user_id = %s AND movie_id = %s;"
+        params = (payload.user_id, payload.movie_id)
+        success, watchlist = self.db.run_query(
+            query, params=params, fetch="one")
+        if not success:
+            return "Failure"
+        if watchlist == 0:
+            query = """
+            INSERT INTO user_watchlist
+            (user_id, movie_id, date, source)
+            VALUES (%s, %s, %s, %s);
+            """
+            params = (payload.user_id, payload.movie_id,
+                      datetime.now(), "groa")
+            success, _ = self.db.run_query(
+                query, params=params, commit=True, fetch="none")
+            if not success:
+                return "Failure"
+        return "Success"
+
+    def remove_watchlist(self, user_id: str, movie_id: str):
+        query = "DELETE FROM user_watchlist WHERE user_id = %s AND movie_id = %s;"
+        params = (user_id, movie_id)
+        success, _ = self.db.run_query(
+            query, params=params, commit=True, fetch="none")
+        if not success:
+            return "Failure"
+        return "Success"
+
+    def add_to_notwatchlist(self, payload: UserAndMovieInput):
+        query = "SELECT COUNT(*) FROM user_willnotwatchlist WHERE user_id = %s AND movie_id = %s;"
+        params = (payload.user_id, payload.movie_id)
+        success, notwatchlist = self.db.run_query(
+            query, params=params, fetch="one")
+        if not success:
+            return "Failure"
+        if notwatchlist == 0:
+            query = """
+            INSERT INTO user_willnotwatchlist
+            (user_id, movie_id, date)
+            VALUES (%s, %s, %s);
+            """
+            params = (payload.user_id, payload.movie_id, datetime.now())
+            success, _ = self.db.run_query(
+                query, params=params, commit=True, fetch="none")
+            if not success:
+                return "Failure"
+        return "Success"
+
+    def remove_notwatchlist(self, user_id: str, movie_id: str):
+        query = "DELETE FROM user_willnotwatchlist WHERE user_id = %s AND movie_id = %s;"
+        success, _ = self.db.run_query(
+            query,
+            params=(user_id, movie_id),
+            commit=True,
+            fetch="none")
+        if not success:
+            return "Failure"
+        return "Success"
+
+    def search_movies(self, query: str):
+        result = self.es.search(index="groa", size=20, expand_wildcards="all", body={
+            "query": {
+                "multi_match": {
+                    "query": query,
+                    "fields": ["description", "primary_title", "original_title", "genres"]
+                }
+            }
+        })
+        movie_ids = []
+        for elem in result['hits']['hits']:
+            movie_ids.append(elem['_id'])
+        search_df = self.__get_info(pd.DataFrame({"movie_id": movie_ids}))
+        search_df = search_df.fillna("None")
+        search_json = self.__get_JSON(search_df)
+        return {
+            "data": search_json
+        }
+
+    def add_interaction(self, user_id: str, movie_id: str):
+        query = """
+        UPDATE recommendations_movies
+        SET interaction = TRUE
+        FROM recommendations
+        WHERE recommendations.user_id = %s 
+        AND recommendations_movies.movie_id = %s;
+        """
+        params = (user_id, movie_id)
+        success, _ = self.db.run_query(
+            query, params=params, commit=True, fetch="none")
+        if not success:
+            return "Failure"
+        return "Success"
+
+    def create_movie_list(self, payload: CreateListInput):
+        """ Creates a MovieList """
+        query = """INSERT INTO movie_lists
+        (user_id, name, private) VALUES (%s, %s, %s) RETURNING list_id;"""
+        params = (payload.user_id, payload.name, payload.private)
+        success, list_id = self.db.run_query(query, params=params, commit=True)
+        if not success:
+            return "Failure"
+        return {
+            "list_id": list_id,
+            "name": payload.name,
+            "private": payload.private
+        }
+
+    def get_user_lists(self, user_id: str):
+        """ Get user's MovieLists """
+        query = "SELECT list_id, name, private FROM movie_lists WHERE user_id = %s;"
+        success, user_lists = self.db.run_query(
+            query, params=(user_id,), fetch="all")
+        if not success:
+            return "Failure"
+        user_lists_json = [self.__get_list_preview(
+            elem) for elem in user_lists]
+        return user_lists_json
+
+    def get_all_lists(self):
+        """ Get all MovieLists """
+        query = "SELECT list_id, name, private FROM movie_lists WHERE private=FALSE;"
+        success, lists = self.db.run_query(query, fetch="all")
+        if not success:
+            return "Failure"
+        lists_json = [self.__get_list_preview(elem) for elem in lists]
+        return lists_json
+
+    def add_to_movie_list(self, list_id: int, movie_id: str):
+        """ Add movie to a MovieList """
+        query = """INSERT INTO list_movies
+        (list_id, movie_id) VALUES (%s, %s);"""
+        params = (list_id, movie_id)
+        success, _ = self.db.run_query(
+            query, params=params, commit=True, fetch="none")
+        if not success:
+            return "Failure"
+        return "Success"
+
+    def remove_from_movie_list(self, list_id: int, movie_id: str):
+        """ Remove movie from a MovieList """
+        query = "DELETE FROM list_movies WHERE list_id = %s AND movie_id = %s;"
+        params = (list_id, movie_id)
+        success, _ = self.db.run_query(
+            query, params=params, commit=True, fetch="none")
+        if not success:
+            return "Failure"
+        return "Success"
+
+    def delete_movie_list(self, list_id: int):
+        """ Delete a MovieList """
+        query = "DELETE FROM movie_lists WHERE list_id = %s RETURNING user_id, private;"
+        success, result = self.db.run_query(
+            query, params=(list_id,), commit=True, fetch="all")
+        if not success:
+            return "Failure"
+        return result[0]
+
+    def get_service_providers(self, movie_id: str):
+        """ Get the service providers of a given movie_id """
+        query = """
+        SELECT m.provider_id, p.name, p.logo_url, m.provider_movie_url, 
+        m.presentation_type, m.monetization_type
+        FROM movie_providers AS m
+        LEFT JOIN providers AS p ON m.provider_id = p.provider_id
+        WHERE m.movie_id = %s; 
+        """
+        success, prov_sql = self.db.run_query(query, params=(movie_id,), fetch="all")
+        prov_json = {
+            "data": []
+        }
+        for provider in prov_sql:
+            prov_json["data"].append({
+                "provider_id": provider[0],
+                "name": provider[1],
+                "logo": str(provider[2]),
+                "link": provider[3],
+                "presentation_type": provider[4],
+                "monetization_type": provider[5]
+            })
+        return prov_json
+
+    def get_recent_recommendations(self):
+        """ Grabs the movies of recent recommendations from our API """
+        query = """
+        SELECT m.movie_id
+        FROM recommendations_movies AS m LEFT JOIN recommendations AS r
+        ON m.recommendation_id = r.recommendation_id
+        ORDER BY r.date DESC
+        LIMIT 50;
+        """
+        success, recs = self.db.run_query(query, fetch="all")
+        if not success:
+            return "Failure"
+        recs_df = pd.DataFrame(recs, columns=["movie_id"])
+        rec_data = self.__get_info(recs_df)
+        rec_data = rec_data.fillna("None")
+        rec_json = self.__get_JSON(rec_data)
+        return {
+            "data": rec_json
+        }
     # ------- End Public Methods -------

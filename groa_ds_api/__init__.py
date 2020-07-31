@@ -8,10 +8,7 @@ import redis
 from fastapi import BackgroundTasks, FastAPI, HTTPException
 
 from groa_ds_api.models import *
-from groa_ds_api.utils.data_util import DataUtility
-from groa_ds_api.utils.database_util import DatabaseUtility
-from groa_ds_api.utils.info_util import InfoUtility
-from groa_ds_api.utils.recommendation_utility import RecommendationUtility
+from groa_ds_api.utils import MovieUtility
 
 app = FastAPI(
     title="groa-ds-api",
@@ -22,10 +19,7 @@ app = FastAPI(
 parent_path = Path(__file__).resolve().parents[1]
 model_path = os.path.join(parent_path, 'w2v_limitingfactor_v3.51.model')
 
-db_tool = DatabaseUtility()
-info_tool = InfoUtility(db_tool)
-predictor = RecommendationUtility(model_path, db_tool, info_tool)
-data_tool = DataUtility(db_tool, info_tool)
+movie_tool = MovieUtility(model_path)
 
 cache = redis.StrictRedis(host=str(os.getenv('REDIS_HOST')))
 
@@ -65,7 +59,7 @@ def create_app():
         if result is not None:
             result = pickle.loads(result)
             return result
-        result = predictor.get_recommendations(payload, background_tasks)
+        result = movie_tool.get_recommendations(payload, background_tasks)
         cache.set("recs"+payload.user_id, pickle.dumps(result))
         return result
     
@@ -91,7 +85,7 @@ def create_app():
         if result is not None:
             result = pickle.loads(result)
             return result
-        result = predictor.get_similar_movies(payload)
+        result = movie_tool.get_similar_movies(payload)
         cache.set("sim"+payload.movie_id, pickle.dumps(result))
         return result
 
@@ -106,7 +100,7 @@ def create_app():
         - **rec_id:** str
         - **movie_id:** str
         """
-        result = data_tool.add_interaction(user_id, movie_id)
+        result = movie_tool.add_interaction(user_id, movie_id)
         if result == "Failure":
             raise HTTPException(status_code=404, detail="Invalid request.")
         return result
@@ -123,7 +117,7 @@ def create_app():
         - **movie_id:** str
         - **rating:** float
         """
-        result = data_tool.add_rating(payload)
+        result = movie_tool.add_rating(payload)
         if result == "Failure":
             raise HTTPException(status_code=404, detail="Invalid request.")
         cache.delete("recs"+payload.user_id)
@@ -139,7 +133,7 @@ def create_app():
         - **user_id** str
         - **movie_id** str
         """
-        result = data_tool.remove_rating(user_id, movie_id)
+        result = movie_tool.remove_rating(user_id, movie_id)
         if result == "Failure":
             raise HTTPException(status_code=404, detail="Invalid request.")
         cache.delete("recs"+user_id)
@@ -151,7 +145,7 @@ def create_app():
         Given the `UserAndMovieInput`, the movie is added to the
         user's watchlist.
         """
-        result = data_tool.add_to_watchlist(payload)
+        result = movie_tool.add_to_watchlist(payload)
         if result == "Failure":
             raise HTTPException(status_code=404, detail="Invalid request.")
         cache.delete("recs"+payload.user_id)
@@ -167,7 +161,7 @@ def create_app():
         - **user_id** str
         - **movie_id** str
         """
-        result = data_tool.remove_watchlist(user_id, movie_id)
+        result = movie_tool.remove_watchlist(user_id, movie_id)
         if result == "Failure":
             raise HTTPException(status_code=404, detail="Invalid request.")
         cache.delete("recs"+user_id)
@@ -179,7 +173,7 @@ def create_app():
         Given the `UserAndMovieInput`, the movie is added to the
         user's willnotwatchlist.
         """
-        result = data_tool.add_to_notwatchlist(payload)
+        result = movie_tool.add_to_notwatchlist(payload)
         if result == "Failure":
             raise HTTPException(status_code=404, detail="Invalid request.")
         cache.delete("recs"+payload.user_id)
@@ -195,7 +189,7 @@ def create_app():
         - **user_id** str
         - **movie_id** str
         """
-        result = data_tool.remove_notwatchlist(user_id, movie_id)
+        result = movie_tool.remove_notwatchlist(user_id, movie_id)
         if result == "Failure":
             raise HTTPException(status_code=404, detail="Invalid request.")
         cache.delete("recs"+user_id)
@@ -224,7 +218,7 @@ def create_app():
         if result is not None:
             result = pickle.loads(result)
             return result
-        result = data_tool.get_service_providers(movie_id)
+        result = movie_tool.get_service_providers(movie_id)
         cache.set("prov"+movie_id, pickle.dumps(result))
         return result
 
@@ -234,7 +228,7 @@ def create_app():
         Given the `SearchInput`, a request is made to our
         AWS Elast Search Service instance to get search results.
         """
-        result = data_tool.search_movies(payload.query)
+        result = movie_tool.search_movies(payload.query)
         return result
 
     @app.get("/explore", response_model=ExploreOutput)
@@ -250,7 +244,7 @@ def create_app():
         if result is not None:
             result = pickle.loads(result)
             return result
-        result = data_tool.get_recent_recommendations()
+        result = movie_tool.get_recent_recommendations()
         if result == "Failure":
             raise HTTPException(status_code=404, detail="Invalid request.")
         cache.set("explore"+today, pickle.dumps(result))
@@ -270,7 +264,7 @@ def create_app():
         Returns:
         - **list_id:** int
         """
-        result = data_tool.create_movie_list(payload)
+        result = movie_tool.create_movie_list(payload)
         if result == "Failure":
             raise HTTPException(status_code=404, detail="Invalid request.")
         cache.delete("lists"+payload.user_id)
@@ -287,7 +281,7 @@ def create_app():
         if result is not None:
             result = pickle.loads(result)
             return result
-        result = data_tool.get_all_lists()
+        result = movie_tool.get_all_lists()
         if result == "Failure":
             raise HTTPException(status_code=404, detail="Invalid request.")
         cache.set("alllists", pickle.dumps(result))
@@ -313,7 +307,7 @@ def create_app():
         if result is not None:
             result = pickle.loads(result)
             return result
-        result = data_tool.get_user_lists(user_id)
+        result = movie_tool.get_user_lists(user_id)
         if result == "Failure":
             raise HTTPException(status_code=404, detail="Invalid request.")
         cache.set("lists"+user_id, pickle.dumps(result))
@@ -338,7 +332,7 @@ def create_app():
         if result is not None:
             result = pickle.loads(result)
             return result
-        result = predictor.get_movie_list(list_id)
+        result = movie_tool.get_movie_list(list_id)
         if result == "Failure":
             raise HTTPException(status_code=404, detail="Invalid request.")
         cache.set("movielist"+str(list_id), pickle.dumps(result))
@@ -357,7 +351,7 @@ def create_app():
         Returns:
         - result: str
         """
-        result = data_tool.add_to_movie_list(list_id, movie_id)
+        result = movie_tool.add_to_movie_list(list_id, movie_id)
         if result == "Failure":
             raise HTTPException(status_code=404, detail="Invalid request.")
         cache.delete("movielist"+str(list_id))
@@ -376,7 +370,7 @@ def create_app():
         Returns:
         - result: str
         """
-        result = data_tool.remove_from_movie_list(list_id, movie_id)
+        result = movie_tool.remove_from_movie_list(list_id, movie_id)
         if result == "Failure":
             raise HTTPException(status_code=404, detail="Invalid request.")
         cache.delete("movielist"+str(list_id))
@@ -393,7 +387,7 @@ def create_app():
         Returns:
         - result: str
         """
-        result = data_tool.delete_movie_list(list_id)
+        result = movie_tool.delete_movie_list(list_id)
         if result == "Failure":
             raise HTTPException(status_code=404, detail="Invalid request.")
         cache.delete("movielist"+str(list_id))
