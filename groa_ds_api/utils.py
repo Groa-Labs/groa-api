@@ -375,7 +375,7 @@ class MovieUtility(object):
             "query": {
                 "multi_match": {
                     "query": query,
-                    "fields": ["description", "primary_title", "original_title", "genres"]
+                    "fields": ["primary_title", "original_title"]
                 }
             }
         })
